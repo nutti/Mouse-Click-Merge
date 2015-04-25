@@ -27,13 +27,13 @@ from bpy.props import *
 
 __author__ = "Nutti <nutti.metro@gmail.com>"
 __status__ = "In Feature Review"
-__version__ = "0.1"
-__date__ = "20 April 2015"
+__version__ = "0.2"
+__date__ = "25 April 2015"
 
 bl_info = {
     "name" : "Mouse Click Merge",
     "author" : "Nutti",
-    "version" : (0,1),
+    "version" : (0,2),
     "blender" : (2, 7, 0),
     "location" : "3D View > Properties Panel > Mouse Click Merge",
     "description" : "Merge by clicking mouse. This add-on is inspired by modeling tool 'Metasequoia'.",
@@ -83,6 +83,8 @@ class MCMOperator(bpy.types.Operator):
     
     def modal(self, context, event):
         mcm_props = bpy.context.scene.mcm_props
+        merge_type = bpy.context.scene.mcm_merge_type
+        merge_uv = bpy.context.scene.mcm_merge_uv
         
         if mcm_props.running is False:
             return {'PASS_THROUGH'}
@@ -133,7 +135,7 @@ class MCMOperator(bpy.types.Operator):
             # merge adjacent vertex
             if nearest_vert is not None:
                 nearest_vert.select_set(True)
-                bpy.ops.mesh.merge(type='CENTER', uvs=False)
+                bpy.ops.mesh.merge(type=merge_type, uvs=merge_uv)
                 mcm_props.merged_count = mcm_props.merged_count + 1
             mcm_props.merged = True
         
@@ -170,25 +172,60 @@ class OBJECT_PT_MCM(bpy.types.Panel):
     bl_region_type = "UI"
     
     def draw(self, context):
+        sc = context.scene
         layout = self.layout
         mcm_props = bpy.context.scene.mcm_props
         if mcm_props.running is False:
             layout.operator(MCMOperator.bl_idname, text="Start Merge Tool", icon="PLAY")
         else:
             layout.operator(MCMOperator.bl_idname, text="Stop Merge Tool", icon="PAUSE")
+        
+        layout.label(text="Merge Type:")
+        layout.prop(sc, "mcm_merge_type", text="")
+        layout.prop(sc, "mcm_merge_uv", text="UV")
+
+def get_allowed_merge_type(scene, context):
+    items = []
+    
+    # FIRST and LAST are allowed when selection mode is VERT
+    if bpy.context.tool_settings.mesh_select_mode[0] is True:
+        items.append(("FIRST", "First", "Merge into first selected vertex."))
+        items.append(("LAST", "Last", "Merge into nearest neighbor vertex."))
+
+    items.append(("CENTER", "Center", "Merge into center of merged vertices."))
+    items.append(("CURSOR", "Cursor", "Merge and move merged vertex to cursor."))
+    
+    return items
 
 
-def register():
-    bpy.utils.register_module(__name__)
-    bpy.types.Scene.mcm_props = PointerProperty(
+def init_properties():
+    sc = bpy.types.Scene
+    sc.mcm_merge_type = EnumProperty(
+        items=get_allowed_merge_type,
+        name="Merge Type",
+        description="Merge Type")
+    sc.mcm_merge_uv = BoolProperty(
+        name="UV",
+        description="Merge with UV.",
+        default=False)
+    sc.mcm_props = PointerProperty(
         name = "MCM internal data",
         description = "MCM internal data",
         type = MCMProperties)
 
+def clear_properties():
+    del bpy.types.Scene.mcm_merge_type
+    del bpy.types.Scene.mcm_merge_uv
+    del bpy.types.Scene.mcm_props
+
+def register():
+    bpy.utils.register_module(__name__)
+    init_properties()
+
 
 def unregister():
     bpy.utils.unregister_module(__name__)
-    del bpy.types.Scene.mcm_props
+    clear_properties()
 
 
 if __name__ == "__main__":
