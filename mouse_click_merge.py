@@ -27,13 +27,13 @@ from bpy.props import *
 
 __author__ = "Nutti <nutti.metro@gmail.com>"
 __status__ = "In Feature Review"
-__version__ = "0.2"
-__date__ = "25 April 2015"
+__version__ = "0.3"
+__date__ = "9 May 2015"
 
 bl_info = {
     "name" : "Mouse Click Merge",
     "author" : "Nutti",
-    "version" : (0,2),
+    "version" : (0,3),
     "blender" : (2, 7, 0),
     "location" : "3D View > Properties Panel > Mouse Click Merge",
     "description" : "Merge by clicking mouse. This add-on is inspired by modeling tool 'Metasequoia'.",
@@ -43,11 +43,22 @@ bl_info = {
     "category" : "3D View"
 }
 
-# properties used by this script
-class MCMProperties(bpy.types.PropertyGroup):
+addon_keymaps = []
+
+def get_allowed_operation(scene, context):
+    items = []
+
+    items.append(("MERGE", "Merge", "Merge nearest-neighbor vertex."))
+    items.append(("FLIP DIAGONAL EDGE", "Flip Diagonal Edge", "Flip diagonal edge."))
+    
+    return items
+
+
+# properties used by "merge" operation
+class MCMMergeProperties(bpy.types.PropertyGroup):
     running = BoolProperty(
         name = "Is Running",
-        description = "Is merge tool running now?",
+        description = "Is merge operation running now?",
         default = False)
     left_mouse_down = BoolProperty(
         name = "Left Mouse Down",
@@ -66,23 +77,36 @@ class MCMProperties(bpy.types.PropertyGroup):
         description = "Merged count",
         default = 0)
 
-# Merge by Mouse Click.
-class MCMOperator(bpy.types.Operator):
-    """Merge by Mouse Click."""
-    
-    bl_idname = "view3d.mouse_click_merge"
-    bl_label = "Merge by Mouse Click"
-    bl_description = "Merge by Mouse Click"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def __init__(self):
+# properties used by "flip diagonal edge" operation
+class MCMFlipDiagonalProperties(bpy.types.PropertyGroup):
+    running = BoolProperty(
+        name = "Is Running",
+        description = "Is flip diagonal operation running now?",
+        default = False)
+    left_mouse_down = BoolProperty(
+        name = "Left Mouse Down",
+        description = "Is left mouse down?",
+        default = False)
+    right_mouse_down = BoolProperty(
+        name = "Right Mouse Down",
+        description = "Is right mouse down?",
+        default = False)
+    fliped = BoolProperty(
+        name = "Fliped",
+        description = "Already fliped?",
+        default = True)
+
+# skeleton strategy
+class MCMStrategySkel():
+    def modal(self, ops, context, event):
         pass
-    
-    def __del__(self):
+    def invoke(self, ops, context, event):
         pass
-    
-    def modal(self, context, event):
-        mcm_props = bpy.context.scene.mcm_props
+
+# strategy: merge
+class MCMMerge(MCMStrategySkel):
+    def modal(self, ops, context, event):
+        mcm_props = bpy.context.scene.mcm_merge_props
         merge_type = bpy.context.scene.mcm_merge_type
         merge_uv = bpy.context.scene.mcm_merge_uv
         
@@ -100,7 +124,6 @@ class MCMOperator(bpy.types.Operator):
                 mcm_props.right_mouse_down = True
             elif event.value == 'RELEASE':
                 mcm_props.right_mouse_down = False
-        
         
         # merge vertex
         if mcm_props.right_mouse_down is True and mcm_props.left_mouse_down is True and mcm_props.merged is False:
@@ -139,14 +162,14 @@ class MCMOperator(bpy.types.Operator):
                 mcm_props.merged_count = mcm_props.merged_count + 1
             mcm_props.merged = True
         
-        # restrain merge operation is down more than twice
+        # restrain merge operation processed more than twice
         if mcm_props.right_mouse_down is False or mcm_props.left_mouse_down is False:
             mcm_props.merged = False
         
         return {'PASS_THROUGH'}
-    
-    def invoke(self, context, event):
-        mcm_props = bpy.context.scene.mcm_props
+    def invoke(self, ops, context, event):
+        sc = context.scene
+        mcm_props = bpy.context.scene.mcm_merge_props
         if context.area.type == 'VIEW_3D':
             # start merge
             if mcm_props.running is False:
@@ -155,15 +178,105 @@ class MCMOperator(bpy.types.Operator):
                 mcm_props.left_mouse_down = False
                 mcm_props.right_mouse_down = False
                 mcm_props.merged_count = 0
-                context.window_manager.modal_handler_add(self)
+                context.window_manager.modal_handler_add(ops)
                 return {'RUNNING_MODAL'}
             # stop merge
             else:
                 mcm_props.running = False
-                self.report({'INFO'}, "Merged: %d vertices." % (mcm_props.merged_count))
+                ops.report({'INFO'}, "Merged: %d vertices." % (mcm_props.merged_count))
                 return {'FINISHED'}
         else:
             return {'CANCELLED'}
+        
+
+# strategy: flip diagonal
+class MCMFlipDiagonal(MCMStrategySkel):
+    def modal(self, ops, context, event):
+        mcm_props = bpy.context.scene.mcm_flip_diag_props
+        merge_type = bpy.context.scene.mcm_merge_type
+        merge_uv = bpy.context.scene.mcm_merge_uv
+        
+        if mcm_props.running is False:
+            return {'PASS_THROUGH'}
+        
+        # update key state
+        if event.type == 'LEFTMOUSE':
+            if event.value == 'PRESS':
+                mcm_props.left_mouse_down = True
+            elif event.value == 'RELEASE':
+                mcm_props.left_mouse_down = False
+        elif event.type == 'RIGHTMOUSE':
+            if event.value == 'PRESS':
+                mcm_props.right_mouse_down = True
+            elif event.value == 'RELEASE':
+                mcm_props.right_mouse_down = False
+
+        if mcm_props.right_mouse_down is True and mcm_props.left_mouse_down is True and mcm_props.fliped is False:
+            bpy.ops.mesh.edge_rotate(use_ccw=False)
+            mcm_props.fliped = True
+        
+        # restrain flip operation processed more than twice
+        if mcm_props.right_mouse_down is False or mcm_props.left_mouse_down is False:
+            mcm_props.fliped = False
+        
+        return {'PASS_THROUGH'}
+    
+    def invoke(self, ops, context, event):
+        sc = context.scene
+        mcm_props = bpy.context.scene.mcm_flip_diag_props
+        if context.area.type == 'VIEW_3D':
+            # start merge
+            if mcm_props.running is False:
+                mcm_props.running = True
+                mcm_props.left_mouse_down = False
+                mcm_props.right_mouse_down = False
+                mcm_props.fliped = False
+                context.window_manager.modal_handler_add(ops)
+                return {'RUNNING_MODAL'}
+            # stop merge
+            else:
+                mcm_props.running = False
+                return {'FINISHED'}
+        else:
+            return {'CANCELLED'}
+
+# Operation.
+class MCMOperator(bpy.types.Operator):
+    """Merge by Mouse Click."""
+    
+    bl_idname = "view3d.mouse_click_merge"
+    bl_label = "Merge by Mouse Click"
+    bl_description = "Merge by Mouse Click"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    strategy = None
+    
+    def __init__(self):
+        pass
+    
+    def __del__(self):
+        pass
+    
+    def modal(self, context, event):
+        if context.area:
+            context.area.tag_redraw()
+        
+        if self.strategy == None:
+            return {'CANCELLED'}
+        else:
+            return self.strategy.modal(self, context, event)
+    
+    def invoke(self, context, event):
+        sc = context.scene
+        if sc.mcm_operation == "MERGE":
+            self.strategy = MCMMerge()
+        elif sc.mcm_operation == "FLIP DIAGONAL EDGE":
+            self.strategy = MCMFlipDiagonal()
+        
+        if self.strategy == None:
+            return {'CANCELLED'}
+        else:
+            return self.strategy.invoke(self, context, event)
         
 # UI view
 class OBJECT_PT_MCM(bpy.types.Panel):
@@ -174,15 +287,23 @@ class OBJECT_PT_MCM(bpy.types.Panel):
     def draw(self, context):
         sc = context.scene
         layout = self.layout
-        mcm_props = bpy.context.scene.mcm_props
-        if mcm_props.running is False:
-            layout.operator(MCMOperator.bl_idname, text="Start Merge Tool", icon="PLAY")
-        else:
-            layout.operator(MCMOperator.bl_idname, text="Stop Merge Tool", icon="PAUSE")
-        
-        layout.label(text="Merge Type:")
-        layout.prop(sc, "mcm_merge_type", text="")
-        layout.prop(sc, "mcm_merge_uv", text="UV")
+        merge_props = bpy.context.scene.mcm_merge_props
+        flip_diag_props = bpy.context.scene.mcm_flip_diag_props
+        layout.prop(sc, "mcm_operation", text="")
+        if sc.mcm_operation == "MERGE":
+            if merge_props.running is False:
+                layout.operator(MCMOperator.bl_idname, text="Start", icon="PLAY")
+            else:
+                layout.operator(MCMOperator.bl_idname, text="Stop", icon="PAUSE")
+            layout.label(text="Merge Type:")
+            layout.prop(sc, "mcm_merge_type", text="")
+            layout.prop(sc, "mcm_merge_uv", text="UV")
+        elif sc.mcm_operation == "FLIP DIAGONAL EDGE":
+            if flip_diag_props.running is False:
+                layout.operator(MCMOperator.bl_idname, text="Start", icon="PLAY")
+            else:
+                layout.operator(MCMOperator.bl_idname, text="Stop", icon="PAUSE")
+
 
 def get_allowed_merge_type(scene, context):
     items = []
@@ -200,6 +321,10 @@ def get_allowed_merge_type(scene, context):
 
 def init_properties():
     sc = bpy.types.Scene
+    sc.mcm_operation = EnumProperty(
+        items=get_allowed_operation,
+        name="Operation",
+        description="Operation")
     sc.mcm_merge_type = EnumProperty(
         items=get_allowed_merge_type,
         name="Merge Type",
@@ -208,23 +333,37 @@ def init_properties():
         name="UV",
         description="Merge with UV.",
         default=False)
-    sc.mcm_props = PointerProperty(
-        name = "MCM internal data",
-        description = "MCM internal data",
-        type = MCMProperties)
+    sc.mcm_merge_props = PointerProperty(
+        name = "MCM merge operation internal data",
+        description = "MCM merge operation internal data",
+        type = MCMMergeProperties)
+    sc.mcm_flip_diag_props = PointerProperty(
+        name = "MCM flip diagonal operation internal data",
+        description = "MCM flip diagonal operation internal data",
+        type = MCMFlipDiagonalProperties)
 
 def clear_properties():
     del bpy.types.Scene.mcm_merge_type
     del bpy.types.Scene.mcm_merge_uv
-    del bpy.types.Scene.mcm_props
+    del bpy.types.Scene.mcm_merge_props
+    del bpy.types.Scene.mcm_flip_diag_props
 
 def register():
     bpy.utils.register_module(__name__)
     init_properties()
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
+        kmi = km.keymap_items.new(MCMOperator.bl_idname, "M", "PRESS", shift=True, alt=False)
+        addon_keymaps.append((km, kmi))
 
 
 def unregister():
     bpy.utils.unregister_module(__name__)
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
     clear_properties()
 
 
